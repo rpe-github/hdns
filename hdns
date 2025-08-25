@@ -1,0 +1,744 @@
+#!/usr/bin/env bash
+# vim: ts=4 sw=4 noai expandtab
+
+set -o errexit -o functrace -o noglob -o nounset -o pipefail
+shopt -s extglob globstar inherit_errexit nullglob
+IFS=$' \t\n' LC_ALL=C LC_CTYPE='' LANG=''
+
+readonly API_BASE_URL="https://dns.hetzner.com/api/v1"
+readonly DEFAULT_TTL=60
+
+#-------------------------------------------------------------------------------
+# Hetzner DNS zone management functions
+#-------------------------------------------------------------------------------
+zone_help() {
+    printf '%s\n' "Manage DNS zones
+
+Usage:
+  hdns zone [command]
+
+Available Commands:
+  create        Create a new DNS zone
+  delete        Delete a DNS zone
+  describe      Describe DNS zone details (alias for get)
+  export-file   Export DNS zone as a zone file
+  get           Get DNS zone details
+  import-file   Import records from a DNS zone file
+  list          List all DNS zones
+  update        Update an existing DNS zone
+  validate-file Validate a DNS zone file
+
+Flags:
+  -h, --help   help for zone
+
+Use \"hdns zone [command] --help\" for more information about a command."
+}
+zone_list() {
+    local usage="
+List all DNS zones
+
+Usage:
+  hdns zone list [-o output_format]
+
+Flags:
+  -h, --help            help for list
+  -o, --output string   output format: json|tsv|yaml (default: tsv)"
+
+    show_help "${@}"
+
+    local format=table
+
+    if [[ ${1:-} == @(-o|--output) ]]; then
+        if [[ ${2:-} == @(json|tsv|yaml) ]]; then
+            format=$2
+            shift 2
+        else
+            err "Missing or invalid parameter for -o"
+        fi
+    fi
+
+    api_call GET "/zones" | output "$format" '"ID NAME TTL STATUS RECORDS", (.zones[] | [.id, .name, .ttl, .status, .records_count] | @tsv)'
+}
+zone_create() {
+    local usage="
+Create a new DNS zone
+
+Usage:
+  hdns zone create <zone_name> [ttl]
+
+Flags:
+  -h, --help   help for create"
+
+    show_help "${@}"
+
+    local zone_name=${1:?Missing domain_name parameter}
+    local ttl=${2:-86400}
+    local payload response zone_id
+
+    payload="{ \"name\": \"$zone_name\", \"ttl\": $ttl }"
+
+    response=$(api_call POST "/zones" "$payload")
+
+    if zone_id=$(printf '%s' "$response" | yq -r '.zone.id' 2>/dev/null); then
+        if [[ -n $zone_id && $zone_id != "null" ]]; then
+            printf '%s\n' "$response"
+            return 0
+        fi
+    fi
+
+    err "Failed to create zone: $response"
+}
+zone_get() {
+    local usage="
+Get DNS zone details
+
+Usage:
+  hdns zone get <zone_id|zone_name>
+  hdns zone describe <zone_id|zone_name>
+
+Flags:
+  -h, --help   help for get"
+
+    show_help "${@}"
+
+    local zone_identifier=${1:?Missing zone_identifier parameter}
+    local zone_id response
+
+    zone_id=$(resolve_zone_id "$zone_identifier")
+
+    response=$(api_call GET "/zones/$zone_id")
+
+    printf '%s\n' "$response" | yq -p json -o yaml .
+}
+zone_update() {
+    local usage="
+Update an existing DNS zone
+
+Usage:
+  hdns zone update <zone_id> <zone_name> [ttl]
+
+Flags:
+  -h, --help   help for update"
+
+    show_help "${@}"
+
+    local zone_identifier=${1:?Missing zone_identifier parameter}
+    local zone_name=${2:?Missing zone_name parameter}
+    local ttl=${3:-86400}
+    local zone_id payload response
+
+    zone_id=$(resolve_zone_id "$zone_identifier")
+
+    payload="{
+  \"name\": \"$zone_name\",
+  \"ttl\": $ttl
+}"
+
+    response=$(api_call PUT "/zones/$zone_id" "$payload")
+
+    printf '%s\n' "$response"
+}
+zone_delete() {
+    local usage="
+Delete a DNS zone
+
+Usage:
+  hdns zone delete <zone_id|zone_name>
+
+Flags:
+  -h, --help   help for delete"
+
+    show_help "${@}"
+
+    local zone_identifier=${1:?Missing zone_identifier parameter}
+    local zone_id response
+
+    zone_id=$(resolve_zone_id "$zone_identifier")
+
+    api_call DELETE "/zones/$zone_id"
+}
+zone_export_file() {
+    local usage="
+Export DNS zone as a zone file
+
+Usage:
+  hdns zone export-file <zone_id|zone_name>
+
+Flags:
+  -h, --help   help for export-file"
+
+    show_help "${@}"
+
+    local zone_identifier=${1:?Missing zone_identifier parameter}
+    local zone_id response
+
+    zone_id=$(resolve_zone_id "$zone_identifier")
+
+    response=$(api_call GET "/zones/$zone_id/export")
+
+    printf '%s\n' "$response"
+}
+zone_validate_file() {
+    local usage="
+Validate a DNS zone file
+
+Usage:
+  hdns zone validate-file <file>
+
+Flags:
+  -h, --help   help for validate-file"
+
+    show_help "${@}"
+
+    local file_path=${1:?Missing file_path parameter}
+    local response
+
+    [[ -f $file_path ]] || err "Zone file not found: $file_path"
+    [[ -s $file_path ]] || err "Zone file is empty: $file_path"
+
+    if ! response=$(curl --silent --show-error --fail-with-body \
+        --request POST \
+        --header "Auth-API-Token: $HCLOUD_TOKEN" \
+        --header "Content-Type: text/plain" \
+        --data-binary "@$file_path" \
+        "${API_BASE_URL}/zones/file/validate" 2>&1); then
+        err "Zone file validation failed: $response"
+    fi
+
+    printf '%s\n' "$response"
+}
+zone_import_file() {
+    local usage="
+Import records from a DNS zone file
+
+Usage:
+  hdns zone import-file <zone_id|zone_name> <file>
+
+Flags:
+  -h, --help   help for import-file"
+
+    show_help "${@}"
+
+    local zone_identifier=${1:?Missing zone_identifier parameter}
+    local file_path=${2:?Missing file_path parameter}
+    local zone_id response
+
+    zone_id=$(resolve_zone_id "$zone_identifier")
+
+    [[ -f $file_path ]] || err "Zone file not found: $file_path"
+
+    if ! response=$(curl --silent --show-error --fail-with-body \
+        --request POST \
+        --header "Auth-API-Token: $HCLOUD_TOKEN" \
+        --header "Content-Type: text/plain" \
+        --data-binary "@$file_path" \
+        "${API_BASE_URL}/zones/$zone_id/import" 2>&1); then
+        err "Zone file import failed: $response"
+    fi
+
+    printf '%s\n' "$response"
+}
+
+#-------------------------------------------------------------------------------
+# Hetzner DNS record management functions
+#-------------------------------------------------------------------------------
+record_help() {
+    printf '%s\n' "Manage DNS records
+
+Usage:
+  hdns record [command]
+
+Available Commands:
+  create            Create a new DNS record
+  create-bulk       Bulk create DNS records from JSON file
+  create-bulk-tsv   Bulk create DNS records from TSV file
+  delete            Delete a DNS record
+  describe          Describe DNS record details (alias for get)
+  get               Get DNS record details
+  list              List DNS records
+  update            Update an existing DNS record
+  update-bulk       Bulk update DNS records from JSON file
+  update-bulk-tsv   Bulk update DNS records from TSV file
+
+Flags:
+  -h, --help   help for record
+
+Use \"hdns record [command] --help\" for more information about a command."
+}
+record_list() {
+    local usage="
+List DNS records
+
+Usage:
+  hdns record list [-o output_format] [zone_id|zone_name]
+
+Flags:
+  -h, --help            help for list
+  -o, --output string   output format: json|tsv|yaml (default: tsv)"
+
+    show_help "${@}"
+
+    local format=table
+
+    if [[ ${1:-} == @(-o|--output) ]]; then
+        if [[ ${2:-} == @(json|tsv|yaml) ]]; then
+            format=$2
+            shift 2
+        else
+            err "Missing or invalid parameter for -o"
+        fi
+    fi
+
+    local zone_identifier=${1:-} endpoint="/records"
+
+    if [[ -n $zone_identifier ]]; then
+        zone_id=$(resolve_zone_id "$zone_identifier")
+        endpoint="/records?zone_id=$zone_id"
+    fi
+
+    api_call GET "$endpoint" | output "$format" '"ID ZONE_ID TYPE NAME VALUE TTL", (.records[] | [.id, .zone_id, .type, .name, .value, .ttl // ""] | @tsv)'
+}
+record_create() {
+    local usage="
+Create a new DNS record
+
+Usage:
+  hdns record create <zone_id|zone_name> <type> <name> <value> [ttl]
+
+Flags:
+  -h, --help   help for create"
+
+    show_help "${@}"
+
+    local zone_identifier=${1:?Missing zone_identifier parameter}
+    local record_type=${2:?Missing record_type parameter}
+    local record_name=${3:?Missing record_name parameter}
+    local record_value=${4:?Missing record_value parameter}
+    local ttl=${5:-$DEFAULT_TTL}
+    local zone_id payload response record_id
+
+    zone_id=$(resolve_zone_id "$zone_identifier")
+
+    payload="{ \"zone_id\": \"$zone_id\", \"type\": \"$record_type\", \"name\": \"$record_name\", \"value\": \"$record_value\", \"ttl\": $ttl }"
+
+    response=$(api_call POST "/records" "$payload")
+
+    if record_id=$(printf '%s' "$response" | yq -r -p json '.record.id' 2>/dev/null); then
+        if [[ -n $record_id && $record_id != "null" ]]; then
+            printf '%s\n' "$response"
+            return 0
+        fi
+    fi
+
+    err "Failed to create record: $response"
+}
+record_get() {
+    local usage="
+Get DNS record details
+
+Usage:
+  hdns record get <record_id>
+  hdns record describe <record_id>
+
+Flags:
+  -h, --help   help for get"
+
+    show_help "${@}"
+
+    local record_id=${1:?Missing record_id parameter}
+    local response
+
+    response=$(api_call GET "/records/$record_id")
+
+    printf '%s\n' "$response" | yq -p json -o yaml .
+}
+record_search() {
+    local usage="
+Search in DNS record list
+
+Usage:
+  hdns record search <zone_id|zone_name> <egrep_expr>
+
+Flags:
+  -h, --help   help for get"
+
+    show_help "${@}"
+
+    local zone_identifier=${1:?Missing zone_identifier parameter}
+    shift
+    local egrep_expr="$*"
+
+    record_list "$zone_identifier" | grep -E "^ID|$egrep_expr"
+}
+record_update() {
+    local usage="
+Update an existing DNS record
+
+Usage:
+  hdns record update <record_id> <zone_id|zone_name> <type> <name> <value> [ttl]
+
+Flags:
+  -h, --help   help for update
+      --ttl    Time to live in seconds (default: 60)"
+
+    show_help "${@}"
+
+    local record_id=${1:?Missing record_id parameter}
+    local zone_identifier=${2:?Missing zone_identifier parameter}
+    local record_type=${3:?Missing record_type parameter}
+    local record_name=${4:?Missing record_name parameter}
+    local record_value=${5:?Missing record_value parameter}
+    local ttl=${6:-$DEFAULT_TTL}
+    local zone_id payload response
+
+    zone_id=$(resolve_zone_id "$zone_identifier")
+
+    payload="{
+  \"zone_id\": \"$zone_id\",
+  \"type\": \"$record_type\",
+  \"name\": \"$record_name\",
+  \"value\": \"$record_value\",
+  \"ttl\": $ttl
+}"
+
+    response=$(api_call PUT "/records/$record_id" "$payload")
+
+    printf '%s\n' "$response"
+}
+record_delete() {
+    local usage="
+Delete a DNS record
+
+Usage:
+  hdns record delete <record_id>
+
+Flags:
+  -h, --help   help for delete"
+
+    show_help "${@}"
+
+    local record_id=${1:?Missing record_id parameter}
+    local response
+
+    response=$(api_call DELETE "/records/$record_id")
+}
+record_create_bulk() {
+    local usage="
+Bulk create DNS records from JSON file
+
+{
+  \"records\": [
+    {
+      \"zone_id\": \"string\",
+      \"type\": \"A\",
+      \"name\": \"string\",
+      \"value\": \"string\",
+      \"ttl\": 0
+    }
+  ]
+}
+
+Usage:
+  hdns record create-bulk <file>
+
+Flags:
+  -h, --help   help for create-bulk"
+
+    show_help "${@}"
+
+    local file_path=${1:?Missing file_path parameter}
+    local response
+
+    [[ -f $file_path ]] || err "Bulk records file not found: $file_path"
+    [[ -s $file_path ]] || err "Bulk records file is empty: $file_path"
+
+    if ! yq -p json . "$file_path" &>/dev/null; then
+        err "JSON file $file_path is not valid"
+    fi
+
+    response=$(api_call POST "/records/bulk" "$(<"$file_path")")
+
+    printf '%s\n' "$response"
+}
+record_export_bulk() {
+    local usage="
+Export DNS records in JSON format for update-bulk
+
+Usage:
+  hdns record export-bulk <zone_id|zone_name>
+
+Flags:
+  -h, --help            help for list"
+
+    show_help "${@}"
+
+    local zone_identifier=${1:?Missing zone_identifier parameter}
+    local endpoint="/records"
+
+    if [[ -n $zone_identifier ]]; then
+        zone_id=$(resolve_zone_id "$zone_identifier")
+        endpoint="/records?zone_id=$zone_id"
+    fi
+
+    api_call GET "$endpoint" | yq -oj 'del(.records[].created) | del(.records[].modified)'
+}
+record_update_bulk() {
+    local usage="
+Bulk update DNS records from JSON file
+
+{
+  \"records\": [
+    {
+      \"id\": \"string\",
+      \"zone_id\": \"string\",
+      \"type\": \"A\",
+      \"name\": \"string\",
+      \"value\": \"string\",
+      \"ttl\": 0
+    }
+  ]
+}
+
+Usage:
+  hdns record update-bulk <file>
+
+Flags:
+  -h, --help   help for update-bulk"
+
+    show_help "${@}"
+
+    local file_path=${1:?Missing file_path parameter}
+    local  response
+
+    [[ -f $file_path ]] || err "Bulk records file not found: $file_path"
+
+    if ! yq -p json . "$file_path" &>/dev/null; then
+        err "JSON file $file_path is not valid"
+    fi
+
+    response=$(api_call PUT "/records/bulk" "$(<"$file_path")")
+
+    printf '%s\n' "$response"
+}
+
+#-------------------------------------------------------------------------------
+# Helper functions
+#-------------------------------------------------------------------------------
+err() {
+    printf 'hdns: ERROR: %s\n' "$*" >&2
+    exit 1
+}
+usage() {
+    printf '%s\n' "A command-line interface for Hetzner DNS
+
+Usage:
+    hdns [command]
+
+Resources:
+    zone        Manage DNS zones
+    record      Manage DNS records
+
+Flags:
+    -h          help for hdns
+    --help      detailed help for hdns with examples
+
+Use \"hdns [command] --help\" for more information about a command."
+}
+extended_usage() {
+    printf '%s\n' "A command-line interface for Hetzner DNS
+
+Usage:
+    hdns [command]
+
+Resources:
+    zone list                                    List all DNS zones
+    zone get <zone_id|zone_name>                 Get DNS zone details
+    zone describe <zone_id|zone_name>            Describe DNS zone details (alias for get)
+    zone create <domain> [ttl]                   Create new DNS zone
+    zone update <zone_id> <zone_name> [ttl]      Update DNS zone
+    zone delete <zone_id|zone_name>              Delete DNS zone
+    zone export-file <zone_id|zone_name>         Export DNS zone in BIND zonefile format
+    zone validate-file <file>                    Validate DNS zone file in BIND zonefile format
+    zone import-file <zone_id|zone_name> <file>  Import DNS zone file in BIND zonefile format
+
+    record list [zone_id|zone_name]              List all DNS records (optionally filtered by zone)
+    record get <record_id>                       Get DNS record details
+    record describe <record_id>                  Describe DNS record details (alias for get)
+    record create <zone_id|zone_name> <type> <name> <value> [ttl]   Create DNS record
+    record search <zone_id|zone_name> <search_string>   Search in DNS record details
+    record update <record_id> <zone_id|zone_name> <type> <name> <value> [ttl]   Update DNS record
+    record delete <record_id>                    Delete DNS record
+    record create-bulk <file>                    Bulk create DNS records from JSON file
+    record export-bulk <zone_id|zone_name>       Export DNS records as JSON suitable for update-bulk
+    record update-bulk <file>                    Bulk update DNS records from JSON file
+
+Flags:
+    -h, --help                          Show this help
+
+Use \"hdns [command] --help\" for more information about a command.
+
+
+DNS Record Types:
+    A, AAAA, NS, MX, CNAME, RP, TXT, SOA, HINFO, SRV, DANE, TLSA, DS, CAA
+
+Examples:
+    # Zone management
+    hdns zone list
+    hdns zone create example.com 3600
+    hdns zone delete example.com
+
+    # Zone file operations
+    hdns zone export-file example.com > /path/to/zone.txt
+    hdns zone validate-file /path/to/zone.txt
+    hdns zone import-file example.com /path/to/zone.txt
+
+    # Record management
+    hdns record list example.com
+    hdns record create example.com A www 192.168.1.1 3600
+    hdns record create example.com CNAME blog www.example.com
+    hdns record create example.com MX @ \"10 mail.example.com\"
+    hdns record create example.com TXT @ \"v=spf1 include:_spf.google.com ~all\"
+
+    # Record bulk operations
+    hdns record export-bulk example.com > /path/to/updates.json
+    hdns record update-bulk /path/to/updates.json
+    hdns record create-bulk /path/to/records.json"
+}
+show_help() {
+    if [[ ${1:-} == @(-h|--help) ]]; then
+        printf '%s\n' "$usage"
+        exit 2
+    fi
+}
+api_call() {
+    local method=${1:?Missing method parameter}
+    local endpoint=${2:?Missing endpoint parameter}
+    local data=${3:-}
+    local response
+    local curl_args=(
+        --silent
+        --show-error
+        --fail-with-body
+        --request "$method"
+        --header "Auth-API-Token: $HCLOUD_TOKEN"
+        --header "Content-Type: application/json"
+    )
+
+    if [[ -n $data ]]; then
+        curl_args+=(--data "$data")
+    fi
+
+    if ! response=$(curl "${curl_args[@]}" "${API_BASE_URL}${endpoint}" 2>&1); then
+        if ! printf '%s\n' "$response" | yq -p json . &>/dev/null; then
+          printf '%s\n' "$response" | head -1 >&2
+        else
+          printf '%s: %s\n' "hdns" "$(printf '%s' "$response" | grep '^{' | yq -p json -r '.error.message')" >&2
+        fi
+        exit 1
+    fi
+
+    printf '%s' "$response"
+}
+output() {
+    local format=${1:?Missing format parameter}
+    local yq_code=${2:?Missing yq_code parameter}
+
+    case $format in
+    json | yaml)
+        yq -p json -o "$format" '.'
+        ;;
+    tsv)
+        yq -r "$yq_code" 2>/dev/null | sed '1s/[[:blank:]]/\t/g'
+        ;;
+    table)
+        yq -r "$yq_code" 2>/dev/null | column -t
+        ;;
+    *)
+        cat
+        ;;
+    esac
+}
+get_zone_id() {
+    local zone_name=${1:?Missing zone_name parameter}
+    local response zone_id
+
+    response=$(api_call GET "/zones")
+
+    if ! zone_id=$(printf '%s\n' "$response" | yq -r ".zones[] | select(.name == \"$zone_name\") | .id" 2>/dev/null); then
+        err "Failed to parse /zones response"
+    fi
+
+    if [[ -z $zone_id || $zone_id == "null" ]]; then
+        err "No zone_id found for zone_name: $zone_name"
+    fi
+
+    printf '%s' "$zone_id"
+}
+resolve_zone_id() {
+    local zone_identifier=${1:?Missing zone_identifier parameter}
+
+    if [[ $zone_identifier != *'.'* ]]; then
+        printf '%s' "$zone_identifier"
+        return 0
+    fi
+
+    get_zone_id "$zone_identifier"
+}
+dispatch_command() {
+    local cmd=${1:-} subcmd=${2:-}
+    shift 2 2>/dev/null || true
+
+    case $cmd in
+    zone)
+        case $subcmd in
+        list)           zone_list "$@" ;;
+        create)         zone_create "$@" ;;
+        get|describe)   zone_get "$@" ;;
+        update)         zone_update "$@" ;;
+        delete)         zone_delete "$@" ;;
+        import-file)    zone_import_file "$@" ;;
+        export-file)    zone_export_file "$@" ;;
+        validate-file)  zone_validate_file "$@" ;;
+        -h | --help)    zone_help; exit 0 ;;
+        *)              zone_help; exit 1 ;;
+        esac ;;
+    record)
+        case $subcmd in
+        list)           record_list "$@" ;;
+        create)         record_create "$@" ;;
+        get|describe)   record_get "$@" ;;
+        search)         record_search "$@" ;;
+        update)         record_update "$@" ;;
+        delete)         record_delete "$@" ;;
+        export-bulk)    record_export_bulk "$@" ;;
+        create-bulk)    record_create_bulk "$@" ;;
+        update-bulk)    record_update_bulk "$@" ;;
+        -h | --help)    record_help; exit 0 ;;
+        *)              record_help; exit 1 ;;
+        esac ;;
+    *)
+        usage
+        exit 1 ;;
+    esac
+}
+main() {
+    command -v curl >/dev/null 2>&1 || err "curl is required but not installed"
+    command -v yq   >/dev/null 2>&1 || err "yq is required but not installed"
+
+    case ${1:-} in
+    -h)     usage; exit 0 ;;
+    --help) extended_usage; exit 0 ;;
+    '')     usage; exit 1 ;;
+    esac
+
+    if [[ ! -v HCLOUD_TOKEN ]]; then
+        env_hcloud_token=$(sed -n '/^HCLOUD_TOKEN=\(.*\)$/s//\1/p' "$HOME/.config/hdns/env" "$HOME/.env" "$PWD/.env" 2>/dev/null || true | head -1)
+        readonly HCLOUD_TOKEN=${env_hcloud_token:?Missing HCLOUD_TOKEN env variable}
+    fi
+
+    dispatch_command "$@"
+}
+
+if [[ ${BASH_SOURCE[0]} == "${0}" ]]; then
+    main "$@"
+fi
