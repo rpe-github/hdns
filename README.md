@@ -33,7 +33,7 @@ I created `hdns` as a companion to the [hcloud](https://github.com/hetznercloud/
    ```bash
    git clone https://github.com/rpe-github/hdns.git
    cd hdns
-   cp /path/to/hdns
+   cp hdns /path/to/
    ```
 
    or download it directly from the Github repository ...
