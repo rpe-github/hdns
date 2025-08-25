@@ -31,7 +31,7 @@ I created `hdns` as a companion to the [hcloud](https://github.com/hetznercloud/
    Either clone the Github repository ...
 
    ```bash
-   git clone https://github.com/<your-username>/hdns.git
+   git clone https://github.com/rpe-github/hdns.git
    cd hdns
    cp /path/to/hdns
    ```
@@ -39,7 +39,7 @@ I created `hdns` as a companion to the [hcloud](https://github.com/hetznercloud/
    or download it directly from the Github repository ...
 
    ```bash
-   curl https://raw.githubusercontent.com/<your-username>/hdns/main/hdns >/path/to/hdns
+   curl https://raw.githubusercontent.com/rpe-github/hdns/main/hdns >/path/to/hdns
    ```
 
 2. **Make the Script Executable**:
