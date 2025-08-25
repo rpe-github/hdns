@@ -65,7 +65,7 @@ The `hdns` CLI currently provides two main resources: `zone` and `record`. Each 
 `hdns --help` shows extended help with examples.
 
 ```bash
-$ ./hdns --help
+$ hdns --help
 A command-line interface for Hetzner DNS
 
 Usage:
