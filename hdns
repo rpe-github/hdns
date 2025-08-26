@@ -56,8 +56,7 @@ Flags:
 Use \"hdns zone [command] --help\" for more information about a command."
 }
 zone_list() {
-    local usage="
-List all DNS zones
+    local usage="List all DNS zones
 
 Usage:
   hdns zone list [-o output_format]
@@ -82,8 +81,7 @@ Flags:
     api_call GET "/zones" | output "$format" '"ID NAME TTL STATUS RECORDS", (.zones[] | [.id, .name, .ttl, .status, .records_count] | @tsv)'
 }
 zone_create() {
-    local usage="
-Create a new DNS zone
+    local usage="Create a new DNS zone
 
 Usage:
   hdns zone create <zone_name> [ttl]
@@ -111,8 +109,7 @@ Flags:
     err "Failed to create zone: $response"
 }
 zone_get() {
-    local usage="
-Get DNS zone details
+    local usage="Get DNS zone details
 
 Usage:
   hdns zone get <zone_id|zone_name>
@@ -133,8 +130,7 @@ Flags:
     printf '%s\n' "$response" | yq -p json -o yaml .
 }
 zone_update() {
-    local usage="
-Update an existing DNS zone
+    local usage="Update an existing DNS zone
 
 Usage:
   hdns zone update <zone_id> <zone_name> [ttl]
@@ -161,8 +157,7 @@ Flags:
     printf '%s\n' "$response"
 }
 zone_delete() {
-    local usage="
-Delete a DNS zone
+    local usage="Delete a DNS zone
 
 Usage:
   hdns zone delete <zone_id|zone_name>
@@ -180,8 +175,7 @@ Flags:
     api_call DELETE "/zones/$zone_id"
 }
 zone_export_file() {
-    local usage="
-Export DNS zone as a zone file
+    local usage="Export DNS zone as a zone file
 
 Usage:
   hdns zone export-file <zone_id|zone_name>
@@ -201,8 +195,7 @@ Flags:
     printf '%s\n' "$response"
 }
 zone_validate_file() {
-    local usage="
-Validate a DNS zone file
+    local usage="Validate a DNS zone file
 
 Usage:
   hdns zone validate-file <file>
@@ -230,8 +223,7 @@ Flags:
     printf '%s\n' "$response"
 }
 zone_import_file() {
-    local usage="
-Import records from a DNS zone file
+    local usage="Import records from a DNS zone file
 
 Usage:
   hdns zone import-file <zone_id|zone_name> <file>
@@ -288,8 +280,7 @@ Flags:
 Use \"hdns record [command] --help\" for more information about a command."
 }
 record_list() {
-    local usage="
-List DNS records
+    local usage="List DNS records
 
 Usage:
   hdns record list [-o output_format] [zone_id|zone_name]
@@ -321,8 +312,7 @@ Flags:
     api_call GET "$endpoint" | output "$format" '"ID ZONE_ID TYPE NAME VALUE TTL", (.records[] | [.id, .zone_id, .type, .name, .value, .ttl // ""] | @tsv)'
 }
 record_create() {
-    local usage="
-Create a new DNS record
+    local usage="Create a new DNS record
 
 Usage:
   hdns record create <zone_id|zone_name> <type> <name> <value> [ttl]
@@ -355,8 +345,7 @@ Flags:
     err "Failed to create record: $response"
 }
 record_get() {
-    local usage="
-Get DNS record details
+    local usage="Get DNS record details
 
 Usage:
   hdns record get <record_id>
@@ -375,14 +364,13 @@ Flags:
     printf '%s\n' "$response" | yq -p json -o yaml .
 }
 record_search() {
-    local usage="
-Search in DNS record list
+    local usage="Search in DNS record list
 
 Usage:
   hdns record search <zone_id|zone_name> <egrep_expr>
 
 Flags:
-  -h, --help   help for get"
+  -h, --help   help for search"
 
     show_help "${@}"
 
@@ -393,8 +381,7 @@ Flags:
     record_list "$zone_identifier" | grep -E "^ID|$egrep_expr"
 }
 record_update() {
-    local usage="
-Update an existing DNS record
+    local usage="Update an existing DNS record
 
 Usage:
   hdns record update <record_id> <zone_id|zone_name> <type> <name> <value> [ttl]
@@ -428,8 +415,7 @@ Flags:
     printf '%s\n' "$response"
 }
 record_delete() {
-    local usage="
-Delete a DNS record
+    local usage="Delete a DNS record
 
 Usage:
   hdns record delete <record_id>
@@ -445,8 +431,7 @@ Flags:
     response=$(api_call DELETE "/records/$record_id")
 }
 record_create_bulk() {
-    local usage="
-Bulk create DNS records from JSON file
+    local usage="Bulk create DNS records from JSON file
 
 {
   \"records\": [
@@ -483,14 +468,13 @@ Flags:
     printf '%s\n' "$response"
 }
 record_export_bulk() {
-    local usage="
-Export DNS records in JSON format for update-bulk
+    local usage="Export DNS records in JSON format for update-bulk
 
 Usage:
   hdns record export-bulk <zone_id|zone_name>
 
 Flags:
-  -h, --help            help for list"
+  -h, --help    help for export-bulk"
 
     show_help "${@}"
 
@@ -505,8 +489,7 @@ Flags:
     api_call GET "$endpoint" | yq -oj 'del(.records[].created) | del(.records[].modified)'
 }
 record_update_bulk() {
-    local usage="
-Bulk update DNS records from JSON file
+    local usage="Bulk update DNS records from JSON file
 
 {
   \"records\": [
@@ -595,7 +578,7 @@ Resources:
     record update-bulk <file>                    Bulk update DNS records from JSON file
 
 Flags:
-    -h, --help                          Show this help
+    -h, --help    Show this help
 
 Use \"hdns [command] --help\" for more information about a command.
 
