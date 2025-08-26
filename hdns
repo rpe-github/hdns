@@ -508,7 +508,7 @@ Flags:
     show_help "${@}"
 
     local file_path=${1:?Missing file_path parameter}
-    local  response
+    local response
 
     [[ -f $file_path ]] || err "Bulk records file not found: $file_path"
 
@@ -701,7 +701,8 @@ dispatch_command() {
         validate-file)  zone_validate_file "$@" ;;
         -h | --help)    zone_help; exit 0 ;;
         *)              zone_help; exit 1 ;;
-        esac ;;
+        esac
+        ;;
     record)
         case $subcmd in
         list)           record_list "$@" ;;
@@ -715,9 +716,9 @@ dispatch_command() {
         update-bulk)    record_update_bulk "$@" ;;
         -h | --help)    record_help; exit 0 ;;
         *)              record_help; exit 1 ;;
-        esac ;;
-    *)
-        usage
+        esac
+        ;;
+    *)  usage
         exit 1 ;;
     esac
 }
