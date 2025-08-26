@@ -67,7 +67,7 @@ Flags:
 
     show_help "${@}"
 
-    local format=table
+    local format=tsv
 
     if [[ ${1:-} == @(-o|--output) ]]; then
         if [[ ${2:-} == @(json|tsv|yaml) ]]; then
@@ -286,7 +286,7 @@ Flags:
 
     show_help "${@}"
 
-    local format=table
+    local format=tsv
 
     if [[ ${1:-} == @(-o|--output) ]]; then
         if [[ ${2:-} == @(json|tsv|yaml) ]]; then
@@ -644,18 +644,9 @@ output() {
     local yq_code=${2:?Missing yq_code parameter}
 
     case $format in
-    json | yaml)
-        yq -p json -o "$format" '.'
-        ;;
-    tsv)
-        yq -r "$yq_code" 2>/dev/null | sed '1s/[[:blank:]]/\t/g'
-        ;;
-    table)
-        yq -r "$yq_code" 2>/dev/null | column -t
-        ;;
-    *)
-        cat
-        ;;
+    json|yaml) yq -p json -o "$format" '.' ;;
+    tsv)       yq -r "$yq_code" 2>/dev/null | sed '1s/[[:blank:]]/\t/g' | column -t ;;
+    *)         cat ;;
     esac
 }
 get_zone_id() {
