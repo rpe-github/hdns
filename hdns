@@ -358,23 +358,6 @@ Flags:
 
     printf '%s\n' "$response" | yq -p json -o yaml .
 }
-record_search() {
-    local usage="Search in DNS record list
-
-Usage:
-  hdns record search <zone_id|zone_name> <egrep_expr>
-
-Flags:
-  -h, --help   help for search"
-
-    show_help "${@}"
-
-    local zone_identifier=${1:?Missing zone_identifier parameter}
-    shift
-    local egrep_expr="$*"
-
-    record_list "$zone_identifier" | grep -E "^ID|$egrep_expr"
-}
 record_update() {
     local usage="Update an existing DNS record
 
@@ -565,7 +548,6 @@ Resources:
     record get <record_id>                       Get DNS record details
     record describe <record_id>                  Describe DNS record details (alias for get)
     record create <zone_id|zone_name> <type> <name> <value> [ttl]   Create DNS record
-    record search <zone_id|zone_name> <search_string>   Search in DNS record details
     record update <record_id> <zone_id|zone_name> <type> <name> <value> [ttl]   Update DNS record
     record delete <record_id>                    Delete DNS record
     record create-bulk <file>                    Bulk create DNS records from JSON file
@@ -699,7 +681,6 @@ dispatch_command() {
         list)           record_list "$@" ;;
         create)         record_create "$@" ;;
         get|describe)   record_get "$@" ;;
-        search)         record_search "$@" ;;
         update)         record_update "$@" ;;
         delete)         record_delete "$@" ;;
         export-bulk)    record_export_bulk "$@" ;;
