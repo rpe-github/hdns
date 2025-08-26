@@ -87,26 +87,27 @@ Usage:
   hdns zone create <zone_name> [ttl]
 
 Flags:
-  -h, --help   help for create"
+  -h, --help            help for create
+  -o, --output string   output format: json|yaml (default: yaml)"
 
     show_help "${@}"
 
-    local zone_name=${1:?Missing domain_name parameter}
-    local ttl=${2:-86400}
-    local payload response zone_id
+    local format=yaml
 
-    payload="{ \"name\": \"$zone_name\", \"ttl\": $ttl }"
-
-    response=$(api_call POST "/zones" "$payload")
-
-    if zone_id=$(printf '%s' "$response" | yq -r '.zone.id' 2>/dev/null); then
-        if [[ -n $zone_id && $zone_id != "null" ]]; then
-            printf '%s\n' "$response"
-            return 0
+    if [[ ${1:-} == @(-o|--output) ]]; then
+        if [[ ${2:-} == @(json|yaml) ]]; then
+            format=$2
+            shift 2
+        else
+            err "Missing or invalid parameter for -o"
         fi
     fi
 
-    err "Failed to create zone: $response"
+    local zone_name=${1:?Missing domain_name parameter}
+    local ttl=${2:-86400}
+    local payload="{ \"name\": \"$zone_name\", \"ttl\": $ttl }"
+
+    api_call POST "/zones" "$payload" | output "$format" .
 }
 zone_get() {
     local usage="Get DNS zone details
