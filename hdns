@@ -147,10 +147,7 @@ Flags:
 
     zone_id=$(resolve_zone_id "$zone_identifier")
 
-    payload="{
-  \"name\": \"$zone_name\",
-  \"ttl\": $ttl
-}"
+    payload="{ \"name\": \"$zone_name\", \"ttl\": $ttl }"
 
     response=$(api_call PUT "/zones/$zone_id" "$payload")
 
@@ -186,13 +183,11 @@ Flags:
     show_help "${@}"
 
     local zone_identifier=${1:?Missing zone_identifier parameter}
-    local zone_id response
+    local zone_id
 
     zone_id=$(resolve_zone_id "$zone_identifier")
 
-    response=$(api_call GET "/zones/$zone_id/export")
-
-    printf '%s\n' "$response"
+    api_call GET "/zones/$zone_id/export"
 }
 zone_validate_file() {
     local usage="Validate a DNS zone file
