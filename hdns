@@ -599,7 +599,6 @@ api_call() {
     local response
     local curl_args=(
         --silent
-        --show-error
         --fail-with-body
         --request "$method"
         --header "Auth-API-Token: $HCLOUD_TOKEN"
@@ -611,11 +610,7 @@ api_call() {
     fi
 
     if ! response=$(curl "${curl_args[@]}" "${API_BASE_URL}${endpoint}" 2>&1); then
-        if ! printf '%s\n' "$response" | yq -p json . &>/dev/null; then
-          printf '%s\n' "$response" | head -1 >&2
-        else
-          printf '%s: %s\n' "hdns" "$(printf '%s' "$response" | grep '^{' | yq -p json -r '.error.message')" >&2
-        fi
+        printf '%s: %s\n' "hdns" "$(printf '%s' "$response" | yq -p json -r '.error.message')" >&2
         exit 1
     fi
 
