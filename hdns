@@ -422,9 +422,20 @@ Usage:
 
 Flags:
   -h, --help   help for update
-      --ttl    Time to live in seconds (default: 60)"
+  -o, --output string   output format: json|yaml (default: yaml)"
 
     show_help "${@}"
+
+    local format=yaml
+
+    if [[ ${1:-} == @(-o|--output) ]]; then
+        if [[ ${2:-} == @(json|yaml) ]]; then
+            format=$2
+            shift 2
+        else
+            err "Missing or invalid parameter for -o"
+        fi
+    fi
 
     local record_id=${1:?Missing record_id parameter}
     local zone_identifier=${2:?Missing zone_identifier parameter}
@@ -432,7 +443,7 @@ Flags:
     local record_name=${4:?Missing record_name parameter}
     local record_value=${5:?Missing record_value parameter}
     local ttl=${6:-$DEFAULT_TTL}
-    local zone_id payload response
+    local zone_id payload
 
     zone_id=$(resolve_zone_id "$zone_identifier")
 
@@ -444,9 +455,7 @@ Flags:
   \"ttl\": $ttl
 }"
 
-    response=$(api_call PUT "/records/$record_id" "$payload")
-
-    printf '%s\n' "$response"
+    api_call PUT "/records/$record_id" "$payload" | output "$format" .
 }
 record_delete() {
     local usage="Delete a DNS record
