@@ -492,9 +492,21 @@ Usage:
   hdns record create-bulk <file>
 
 Flags:
-  -h, --help   help for create-bulk"
+  -h, --help            help for create-bulk
+  -o, --output string   output format: json|yaml (default: yaml)"
 
     show_help "${@}"
+
+    local format=yaml
+
+    if [[ ${1:-} == @(-o|--output) ]]; then
+        if [[ ${2:-} == @(json|yaml) ]]; then
+            format=$2
+            shift 2
+        else
+            err "Missing or invalid parameter for -o"
+        fi
+    fi
 
     local file_path=${1:?Missing file_path parameter}
     local response
@@ -506,9 +518,7 @@ Flags:
         err "JSON file $file_path is not valid"
     fi
 
-    response=$(api_call POST "/records/bulk" "$(<"$file_path")")
-
-    printf '%s\n' "$response"
+    api_call POST "/records/bulk" "$(<"$file_path")" | output "$format" .
 }
 record_export_bulk() {
     local usage="Export DNS records in JSON format for update-bulk
